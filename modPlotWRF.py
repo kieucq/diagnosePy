@@ -224,6 +224,7 @@ class var3D:
     def plot_xSection_grid3D(self,df,a,xlat=-99,xlon=-99,
                              slat=-90,elat=90,
                              slon=-180,elon=180,
+                             lev1=1,lev2=10,
                              clevs=[-1,0,1],ticks=[-1,0,1],
                              labels="Ticks labels",
                              title="WRF",
@@ -251,39 +252,48 @@ class var3D:
 
         # Get the cross section slice
         if xlat !=-99:
-            cross_section = a[:, ilat, cs:ce]  # shape = (nz, nx)
+            cross_section = a[lev1:lev2, ilat, cs:ce]  # shape = (nz, nx)
             h = df.XLONG[0,ilat,cs:ce]  
         elif xlon != -99:
-            cross_section = a[:, rs:re, ilon]  # shape = (nz, ny)  
+            cross_section = a[lev1:lev2, rs:re, ilon]  # shape = (nz, ny)  
             h = df.XLAT[0,rs:re,ilon]  
 
         # define the vertical mesh
         if zlev == "m":
             z = np.linspace(0, self.nz, self.nz)   # vertical height (e.g., km)    
         elif zlev == "s": 
-            z = df.ZNU.values[0]
+            z = df.ZNU.values[0]*1000
         else:
             raise ValueError('zlev option is not support. Must be level/sigma/pressure/height')
             return
-        H, Z = np.meshgrid(h, z)  
+        H, Z = np.meshgrid(h, z[lev1:lev2])  
 
         # create our own color table
+        #bcols = color.myColor(clevs,minc,maxc)
+        #my_cmap = ListedColormap(bcols, name='my_colormap')
+        #norm = colors.BoundaryNorm(boundaries=clevs, ncolors=my_cmap.N) 
+
+        # create my own color table
         bcols = color.myColor(clevs,minc,maxc)
-        my_cmap = ListedColormap(bcols, name='my_colormap')
-        norm = colors.BoundaryNorm(boundaries=clevs, ncolors=my_cmap.N) 
+        if clevs == [-999]:
+            print("Plotting default color range")
+            my_cmap = plt.cm.coolwarm
+        else:
+            print("Plotting customized color range")
+            my_cmap, norm = color.make_cmap(clevs,neg_color=minc, pos_color=maxc)
 
         # Plot vertical cross-section 
         plt.figure(figsize=(7, 5))    
         if option == "shading":
-            if minc == (0,0,0) and maxc == (1,1,1):
-                plot_out = plt.contourf(H, Z, cross_section, cmap='coolwarm', levels=clevs)
+            if clevs == [-999]:
+                plot_out = plt.contourf(H, Z, cross_section, cmap='coolwarm',extend='both')
                 plt.colorbar(label=labels,orientation='vertical')
             else:
-                plot_out = plt.contourf(H, Z, cross_section, cmap=my_cmap, norm=norm, levels=clevs)
+                plot_out = plt.contourf(H, Z, cross_section, cmap=my_cmap, norm=norm, levels=clevs,extend='both')
                 plt.colorbar(label=labels,orientation='vertical')
         elif option == "contour":
-            if minc == (0,0,0) and maxc == (1,1,1):
-                plot_out = plt.contour(H, Z, cross_section, cmap='coolwarm', levels=clevs)
+            if clevs == [-999]:
+                plot_out = plt.contour(H, Z, cross_section, cmap='coolwarm')
             else:
                 plot_out = plt.contour(H, Z, cross_section, cmap=my_cmap, norm=norm, levels=clevs)
             plt.clabel(plot_out, inline=True, fontsize=cfont, fmt='%d')
@@ -297,9 +307,11 @@ class var3D:
             plt.xlabel('Longitude')    
 
         if zlev == "s" or zlev == "p":
+            yticks = np.arange(100, 1000, 200)
             plt.ylabel('Vertical level (sigma/p)')
             plt.gca().invert_yaxis()
             plt.yscale("log")
+            plt.yticks(yticks, [f"{y}" for y in yticks])
         else:
              plt.ylabel('Vertical level (k/km)')
         plt.tight_layout()
