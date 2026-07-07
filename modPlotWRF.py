@@ -124,7 +124,7 @@ class var3D:
                            vector=False,maplinewidth=0.5):
 
         # Create contour plot
-        plt.figure(figsize=(7, 5))
+        plt.figure(figsize=(7, 7))
         Lx = (self.nx-1)*self.dx
         Ly = (self.ny-1)*self.dx
         X = np.linspace(-Lx/2, Lx/2, self.nx)   # X-axis values
@@ -151,7 +151,7 @@ class var3D:
                 if cvar.any() != None:
                     plot_contour = plt.contour(x[rs:re,cs:ce], y[rs:re,cs:ce], cvar[ilev,rs:re,cs:ce], 
                                                levels=clevs, colors=ccolor, linewidths=cthick)
-            cbar = plt.colorbar(plot_out, location='bottom', pad=0.05)
+            cbar = plt.colorbar(plot_out, location='bottom', pad=0.2)
             cbar.set_label(labels)
         else:
             if clevs == [-999]:
@@ -163,9 +163,10 @@ class var3D:
         # adding a vector on top
         if vector:
             u1,v1 = u3d[ilev,rs:re,cs:ce],v3d[ilev,rs:re,cs:ce]
+            x1,y1 = x[rs:re,cs:ce],y[rs:re,cs:ce]
             skip = (slice(None, None, skipy), slice(None, None, skipx))  # skip 2 arrows in row, and 3 arrow in cols dim
 
-            Q = plt.quiver(x[skip], y[skip], u1[skip], v1[skip], scale=scale, color='k')
+            Q = plt.quiver(x1[skip], y1[skip], u1[skip], v1[skip], scale=scale, color='k')
             plt.quiverkey(Q, 0.9, -0.2, 10, '10 m/s', labelpos='E')
 
         # title and axis label
