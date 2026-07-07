@@ -110,12 +110,19 @@ class var3D:
         return v1 
 
     # plot a shading map at one given z-level on the gridded map (in km for x and y axes)
-    def plot_shading_grid3D(self,a,ilev=1,rs=1,re=2,cs=1,ce=2,
-                         clevs=[-1,0,1],title="WRF",
-                         minc=(0,0,0),
-                         maxc=(0,0,1),
-                         labels="Ticks labels",
-                         ticks=[-1,0,1]):
+    def plot_zlevel_grid3D(self,a,cvar=None,
+                           u3d=[],v3d=[],
+                           ilev=1,rs=1,re=2,cs=1,ce=2,
+                           clevs=[-999],title="WRF",
+                           minc=(0,0,0),
+                           maxc=(0,0,1),
+                           labels="Ticks labels",
+                           ticks=[-1,0,1],
+                           ccolor="black",cthick=1.0,                          
+                           scale=500,skipx=1,skipy=1,
+                           option="shading",cfont=12,
+                           vector=False,maplinewidth=0.5):
+
         # Create contour plot
         plt.figure(figsize=(7, 5))
         Lx = (self.nx-1)*self.dx
@@ -123,28 +130,52 @@ class var3D:
         X = np.linspace(-Lx/2, Lx/2, self.nx)   # X-axis values
         Y = np.linspace(-Ly/2, Ly/2, self.ny)   # Y-axis values
         x, y = np.meshgrid(X, Y)
-         
-        # plot color shaded using my contour levels
-        #clevs = [1.,3.,5.,7.,9.,12.,15.,18.,21.,25.,30.,35.,40.,100.]
-        #bcols = color.myColor(clevs,(0.9,0.9,1.),(0.,0.,1.))
-        bcols = color.myColor(clevs,minc,maxc)
-        if re != 2 and ce !=2:
-            plt.contourf(x[rs:re,cs:ce], y[rs:re,cs:ce], a[ilev,rs:re,cs:ce], 
-                         levels=clevs, colors=bcols)
-        else:
-            plt.contourf(x, y, a[ilev,:,:])
 
-        # Add a custom colorbar
-        plt.colorbar(label=labels,ticks=ticks)
+        # create my own color table
+        bcols = color.myColor(clevs,minc,maxc)
+        if clevs == [-999]:
+            print("Plotting default color range")
+            my_cmap = plt.cm.coolwarm
+        else:
+            print("Plotting customized color range")
+            my_cmap, norm = color.make_cmap(clevs,neg_color=minc, pos_color=maxc)
+
+        # plot either contour or shading mode
+        if option == "shading":
+            if clevs == [-999]:
+                plot_out = plt.contourf(x[rs:re,cs:ce], y[rs:re,cs:ce], a[ilev,rs:re,cs:ce], cmap=my_cmap)
+                if cvar.any() != None:
+                    plot_contour = plt.contour(x[rs:re,cs:ce], y[rs:re,cs:ce], cvar[ilev,rs:re,cs:ce], colors=ccolor, linewidths=cthick)
+            else:
+                plot_out = plt.contourf(x[rs:re,cs:ce], y[rs:re,cs:ce], a[ilev,rs:re,cs:ce],levels=clevs, colors=bcols)
+                if cvar.any() != None:
+                    plot_contour = plt.contour(x[rs:re,cs:ce], y[rs:re,cs:ce], cvar[ilev,rs:re,cs:ce], 
+                                               levels=clevs, colors=ccolor, linewidths=cthick)
+            cbar = plt.colorbar(plot_out, location='bottom', pad=0.05)
+            cbar.set_label(labels)
+        else:
+            if clevs == [-999]:
+                plot_out = plt.contour(x[rs:re,cs:ce], y[rs:re,cs:ce], a[ilev,rs:re,cs:ce], cmap=my_cmap)
+            else:
+                plot_out = plt.contour(x[rs:re,cs:ce], y[rs:re,cs:ce], a[ilev,rs:re,cs:ce], cmap=my_cmap, levels=clevs)
+            plt.clabel(plot_out, inline=True, fontsize=cfont, fmt='%d')
+
+        # adding a vector on top
+        if vector:
+            u1,v1 = u3d[ilev,rs:re,cs:ce],v3d[ilev,rs:re,cs:ce]
+            skip = (slice(None, None, skipy), slice(None, None, skipx))  # skip 2 arrows in row, and 3 arrow in cols dim
+
+            Q = plt.quiver(x[skip], y[skip], u1[skip], v1[skip], scale=scale, color='k')
+            plt.quiverkey(Q, 0.9, -0.2, 10, '10 m/s', labelpos='E')
 
         # title and axis label
         plt.title(f"{title} at level k = {ilev}")
         plt.xlabel("X (km)")
         plt.ylabel("Y (km)")
-        plt.show()   
-        
+        plt.show()
+
     # plot a contour or shading map at one given z-level on the world map with wind vector field
-    def plot_zlevel_world3D(self,df,a,
+    def plot_zlevel_world3D(self,df,a,cvar=None,
                            u3d=[],v3d=[],ilev=1,
                            slat=-90,elat=90,
                            slon=-180,elon=180,
@@ -152,6 +183,7 @@ class var3D:
                            title="WRF",
                            minc=(0,0,0),
                            maxc=(1,1,1),
+                           ccolor="black",cthick=1.0,
                            labels="Ticks labels",
                            ticks=[-1,0,1],
                            scale=500,skipx=1,skipy=1,
@@ -180,8 +212,6 @@ class var3D:
             print("Plotting default color range")
             my_cmap = plt.cm.coolwarm
         else:
-            #my_cmap = ListedColormap(bcols, name='my_colormap')
-            #norm = colors.BoundaryNorm(boundaries=clevs, ncolors=my_cmap.N) #cmap.N)
             print("Plotting customized color range")
             my_cmap, norm = color.make_cmap(clevs,neg_color=minc, pos_color=maxc)
 
@@ -192,10 +222,14 @@ class var3D:
         if option == "shading":
             if clevs == [-999]:
                 plot_out = m.pcolormesh(x, y, a[ilev,rs:re,cs:ce], shading='auto', cmap=my_cmap)
+                if cvar.any() != None:
+                    plot_contour = m.contour(x, y, cvar[ilev,rs:re,cs:ce], colors=ccolor, linewidths=cthick)
             else:
                 plot_out = m.pcolormesh(x, y, a[ilev,rs:re,cs:ce], cmap=my_cmap, norm=norm, shading='auto')    
+                if cvar.any() != None:
+                    plot_contour = m.contour(x, y, cvar[ilev,rs:re,cs:ce], levels=clevs, colors=ccolor, linewidths=cthick)
             cbar = m.colorbar(plot_out, location='bottom', pad='5%')
-            cbar.set_label(labels)
+            cbar.set_label(labels)                            
         else:
             if clevs == [-999]:
                 plot_out = m.contour(x, y, a[ilev,rs:re,cs:ce], cmap=my_cmap)
