@@ -151,7 +151,7 @@ class var3D:
                 if cvar.any() != None:
                     plot_contour = plt.contour(x[rs:re,cs:ce], y[rs:re,cs:ce], cvar[ilev,rs:re,cs:ce], 
                                                levels=clevs, colors=ccolor, linewidths=cthick)
-            cbar = plt.colorbar(plot_out, location='bottom', pad=0.2)
+            cbar = plt.colorbar(plot_out, location='bottom', pad=0.12)
             cbar.set_label(labels)
         else:
             if clevs == [-999]:
