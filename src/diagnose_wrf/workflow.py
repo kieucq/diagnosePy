@@ -29,7 +29,7 @@ from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.lines import Line2D
 from mpl_toolkits.basemap import Basemap
 
-import modColorCode as color
+from . import color
 
 
 DEFAULT_TIME_REGEX = r"(\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2})"
@@ -48,7 +48,7 @@ def _xr():
 
 
 def _wrfplot():
-    import modPlotWRF as wrfplot
+    from . import legacy_plot as wrfplot
 
     return wrfplot
 

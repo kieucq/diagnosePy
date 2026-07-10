@@ -1,6 +1,4 @@
-wrfout*
-wrfinput*
-wrfbdy*
 __pycache__
 .ipynb_checkpoints
-
+backup
+data/wrfout

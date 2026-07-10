@@ -1,7 +1,7 @@
 import numpy as np
 import xarray as xr
 import matplotlib.pyplot as plt
-import modColorCode as color
+from . import color
 
 def metadataWRF(df):
     coords = list(df.coords)

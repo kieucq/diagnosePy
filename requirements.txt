@@ -1,0 +1,8 @@
+numpy
+xarray
+netCDF4
+matplotlib
+basemap
+jupyter
+ipython
+pillow

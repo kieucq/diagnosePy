@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "diagnose-wrf"
+version = "0.1.0"
+description = "WRF diagnostic plotting workflows for tropical cyclone case studies."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "xarray",
+    "netCDF4",
+    "matplotlib",
+    "basemap",
+]
+
+[project.optional-dependencies]
+notebooks = [
+    "jupyter",
+    "ipython",
+    "pillow",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
