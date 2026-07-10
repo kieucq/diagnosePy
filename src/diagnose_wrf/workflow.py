@@ -11,6 +11,10 @@ plot_track
     Track and plot Typhoon using 850-hPa perturbation height, pressure over
     land, maximum 10-m wind, and a 50-km-per-6-hour continuity check.
 
+plot_vortex_intensity_timeseries
+    Track Pmin, Vmax, and RMW over ocean points and plot Pmin/Vmax as a
+    dual-axis time series.
+
 plot_vertical_cross_section
     Plot a WRF vertical cross section with shading, signed contours, and
     vertical-plane wind vectors.
@@ -483,6 +487,15 @@ def _masked_min_center(field, valid_mask, lats, lons, method, units):
     return _center_dict(row, col, lats, lons, field, method, units)
 
 
+def _masked_min_center_quiet(field, valid_mask, lats, lons, method, units):
+    valid = valid_mask & np.isfinite(field)
+    if not valid.any():
+        raise ValueError(f"No valid points for {method}")
+    search = np.where(valid, field, np.inf)
+    row, col = np.unravel_index(np.nanargmin(search), search.shape)
+    return _center_dict(row, col, lats, lons, field, method, units)
+
+
 def _masked_max_center(field, valid_mask, lats, lons, method, units):
     valid = valid_mask & np.isfinite(field)
     if not valid.any():
@@ -499,6 +512,16 @@ def _haversine_km(lat1, lon1, lat2, lon2):
     dlambda = np.radians(lon2 - lon1)
     a = np.sin(dphi / 2.0) ** 2 + np.cos(phi1) * np.cos(phi2) * np.sin(dlambda / 2.0) ** 2
     return float(2.0 * radius_km * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a)))
+
+
+def _haversine_grid_km(lat0, lon0, lats, lons):
+    radius_km = 6371.0
+    phi0 = np.radians(float(lat0))
+    phi = np.radians(np.asarray(lats, dtype=float))
+    dphi = np.radians(np.asarray(lats, dtype=float) - float(lat0))
+    dlambda = np.radians(np.asarray(lons, dtype=float) - float(lon0))
+    a = np.sin(dphi / 2.0) ** 2 + np.cos(phi0) * np.cos(phi) * np.sin(dlambda / 2.0) ** 2
+    return 2.0 * radius_km * np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))
 
 
 def _pairwise_distances_km(centers):
@@ -769,6 +792,80 @@ def _find_vortex_center(
                 )
         row.update(distances)
         return row
+
+
+def _extract_vortex_intensity(
+    path,
+    time_index=0,
+    max_pmin_vmax_distance_km=180.0,
+    max_ocean_hgt_m=100.0,
+    pressure_var_candidates=("SLP", "slp", "PMSL", "MSLP", "PSFC"),
+    landmask_var_candidates=("LANDMASK", "XLAND"),
+    filename_time_regex=DEFAULT_TIME_REGEX,
+    filename_time_format=DEFAULT_TIME_FORMAT,
+):
+    with _xr().open_dataset(path) as dataset:
+        pressure, pressure_name = _sea_level_pressure_plane(dataset, time_index, pressure_var_candidates)
+        lats, lons = _lat_lon_arrays(dataset, time_index)
+        _land_mask, ocean_mask, landmask_name = _land_ocean_masks(dataset, landmask_var_candidates, time_index)
+        ocean_mask = _low_elevation_ocean_mask(dataset, ocean_mask, time_index, max_ocean_hgt_m)
+        speed10 = _wind10m_speed(dataset, time_index)
+
+        pmin_center = _masked_min_center_quiet(
+            pressure,
+            ocean_mask,
+            lats,
+            lons,
+            f"minimum {pressure_name} over ocean",
+            "hPa",
+        )
+        distance_from_pmin = _haversine_grid_km(
+            pmin_center["latitude"],
+            pmin_center["longitude"],
+            lats,
+            lons,
+        )
+        wind_search_mask = (
+            ocean_mask
+            & np.isfinite(speed10)
+            & np.isfinite(distance_from_pmin)
+            & (distance_from_pmin <= float(max_pmin_vmax_distance_km))
+        )
+        vmax_center = _masked_max_center(
+            speed10,
+            wind_search_mask,
+            lats,
+            lons,
+            f"maximum 10-m wind within {max_pmin_vmax_distance_km:g} km of Pmin",
+            "m s-1",
+        )
+        rmw_km = float(distance_from_pmin[vmax_center["row"], vmax_center["col"]])
+
+        parsed_time, text = _parse_filename_time(path, filename_time_regex, filename_time_format)
+        time_label = parsed_time.strftime(filename_time_format) if parsed_time is not None else text
+        return {
+            "time": time_label,
+            "datetime": parsed_time,
+            "lat": pmin_center["latitude"],
+            "lon": pmin_center["longitude"],
+            "latitude": pmin_center["latitude"],
+            "longitude": pmin_center["longitude"],
+            "Vmax": vmax_center["value"],
+            "Pmin": pmin_center["value"],
+            "RMW": rmw_km,
+            "vmax_lat": vmax_center["latitude"],
+            "vmax_lon": vmax_center["longitude"],
+            "vmax_row": vmax_center["row"],
+            "vmax_col": vmax_center["col"],
+            "pmin_row": pmin_center["row"],
+            "pmin_col": pmin_center["col"],
+            "pmin_vmax_distance_km": rmw_km,
+            "pressure_name": pressure_name,
+            "landmask_name": landmask_name,
+            "max_ocean_hgt_m": max_ocean_hgt_m,
+            "max_pmin_vmax_distance_km": max_pmin_vmax_distance_km,
+            "file": Path(path).name,
+        }
 
 
 def _map_field_2d(
@@ -1558,6 +1655,209 @@ def plot_track(
         return fig, track_rows, observed_rows
     return fig
 
+
+def plot_vortex_intensity_timeseries(
+    files,
+    observed_track_file=None,
+    time_index=0,
+    max_pmin_vmax_distance_km=180.0,
+    max_ocean_hgt_m=100.0,
+    pressure_var_candidates=("SLP", "slp", "PMSL", "MSLP", "PSFC"),
+    landmask_var_candidates=("LANDMASK", "XLAND"),
+    filename_time_regex=DEFAULT_TIME_REGEX,
+    filename_time_format=DEFAULT_TIME_FORMAT,
+    time_axis="hours",
+    model_vmax_scale=1.0,
+    observed_vmax_scale=0.514444,
+    vmax_units="m s-1",
+    figsize=(10, 5.5),
+    xlabel_fontsize=None,
+    pmin_ylabel_fontsize=None,
+    vmax_ylabel_fontsize=None,
+    xtick_fontsize=None,
+    ytick_fontsize=None,
+    x_tick_count=None,
+    pmin_tick_count=None,
+    vmax_tick_count=None,
+    model_pmin_color="black",
+    model_vmax_color="black",
+    model_pmin_linewidth=2.2,
+    model_vmax_linewidth=2.2,
+    model_pmin_linestyle="solid",
+    model_vmax_linestyle="dotted",
+    observed_pmin_color="red",
+    observed_vmax_color="red",
+    observed_pmin_linewidth=2.0,
+    observed_vmax_linewidth=2.0,
+    observed_pmin_linestyle="solid",
+    observed_vmax_linestyle="dotted",
+    marker=None,
+    observed_marker=None,
+    grid=True,
+    title=None,
+    invert_pmin_axis=False,
+    csv_output_file=None,
+    save_path=None,
+    return_data=False,
+):
+    """
+    Track and plot vortex Pmin/Vmax intensity time series from WRF d01 files.
+
+    Pmin is the minimum sea-level pressure over low-elevation ocean points.
+    Vmax is the maximum 10-m wind over ocean points within
+    ``max_pmin_vmax_distance_km`` of the Pmin center, so RMW is the distance
+    between the Pmin and Vmax locations. The CSV output is written as
+    ``time,lat,lon,Vmax,Pmin,RMW``.
+    """
+    wrf_files = _sort_files(files, filename_time_regex, filename_time_format)
+    if not wrf_files:
+        raise ValueError("files is empty")
+
+    model_rows = [
+        _extract_vortex_intensity(
+            path,
+            time_index=time_index,
+            max_pmin_vmax_distance_km=max_pmin_vmax_distance_km,
+            max_ocean_hgt_m=max_ocean_hgt_m,
+            pressure_var_candidates=pressure_var_candidates,
+            landmask_var_candidates=landmask_var_candidates,
+            filename_time_regex=filename_time_regex,
+            filename_time_format=filename_time_format,
+        )
+        for path in wrf_files
+    ]
+
+    observed_rows = parse_observed_atcf_track(observed_track_file, output_time_format=filename_time_format) if observed_track_file else []
+    model_datetimes = [row["datetime"] for row in model_rows]
+    valid_model_datetimes = [dt for dt in model_datetimes if dt is not None]
+    start_time = valid_model_datetimes[0] if valid_model_datetimes else None
+
+    if time_axis == "datetime" and len(valid_model_datetimes) == len(model_rows):
+        model_x = model_datetimes
+        observed_x = [row["datetime"] for row in observed_rows]
+        xlabel = "Simulation time"
+    elif time_axis == "index" or start_time is None or len(valid_model_datetimes) != len(model_rows):
+        model_x = np.arange(len(model_rows), dtype=float)
+        observed_x = np.arange(len(observed_rows), dtype=float)
+        xlabel = "Time index"
+        if observed_rows and (start_time is None or len(valid_model_datetimes) != len(model_rows)):
+            warnings.warn("Model times could not be parsed; observed track is plotted by row index.", RuntimeWarning)
+    else:
+        model_x = np.array([(dt - start_time).total_seconds() / 3600.0 for dt in model_datetimes], dtype=float)
+        observed_x = np.array([(row["datetime"] - start_time).total_seconds() / 3600.0 for row in observed_rows], dtype=float)
+        xlabel = "Simulation time (h)"
+
+    model_pmin = np.array([row["Pmin"] for row in model_rows], dtype=float)
+    model_vmax = np.array([row["Vmax"] for row in model_rows], dtype=float) * float(model_vmax_scale)
+
+    fig, ax_pmin = plt.subplots(figsize=figsize)
+    ax_vmax = ax_pmin.twinx()
+
+    model_pmin_line = ax_pmin.plot(
+        model_x,
+        model_pmin,
+        color=model_pmin_color,
+        linewidth=model_pmin_linewidth,
+        linestyle=model_pmin_linestyle,
+        marker=marker,
+        label="WRF Pmin",
+    )
+    model_vmax_line = ax_vmax.plot(
+        model_x,
+        model_vmax,
+        color=model_vmax_color,
+        linewidth=model_vmax_linewidth,
+        linestyle=model_vmax_linestyle,
+        marker=marker,
+        label="WRF Vmax",
+    )
+
+    observed_lines = []
+    if observed_rows:
+        obs_pmin = np.array([row["pressure_hpa"] for row in observed_rows], dtype=float)
+        obs_vmax = np.array([row["vmax_kt"] for row in observed_rows], dtype=float) * float(observed_vmax_scale)
+        obs_x = np.asarray(observed_x)
+
+        valid_pmin = np.isfinite(obs_pmin)
+        valid_vmax = np.isfinite(obs_vmax)
+        if valid_pmin.any():
+            observed_lines += ax_pmin.plot(
+                obs_x[valid_pmin],
+                obs_pmin[valid_pmin],
+                color=observed_pmin_color,
+                linewidth=observed_pmin_linewidth,
+                linestyle=observed_pmin_linestyle,
+                marker=observed_marker,
+                label="Observed Pmin",
+            )
+        if valid_vmax.any():
+            observed_lines += ax_vmax.plot(
+                obs_x[valid_vmax],
+                obs_vmax[valid_vmax],
+                color=observed_vmax_color,
+                linewidth=observed_vmax_linewidth,
+                linestyle=observed_vmax_linestyle,
+                marker=observed_marker,
+                label="Observed Vmax",
+            )
+
+    ax_pmin.set_xlabel(xlabel, fontsize=xlabel_fontsize)
+    ax_pmin.set_ylabel("Pmin (hPa)", fontsize=pmin_ylabel_fontsize)
+    ax_vmax.set_ylabel(f"Vmax ({vmax_units})", fontsize=vmax_ylabel_fontsize)
+    if xtick_fontsize is not None:
+        ax_pmin.tick_params(axis="x", labelsize=xtick_fontsize)
+    if ytick_fontsize is not None:
+        ax_pmin.tick_params(axis="y", labelsize=ytick_fontsize)
+        ax_vmax.tick_params(axis="y", labelsize=ytick_fontsize)
+
+    if x_tick_count is not None and int(x_tick_count) >= 2:
+        xmin, xmax = ax_pmin.get_xlim()
+        ax_pmin.set_xticks(np.linspace(xmin, xmax, int(x_tick_count)))
+    if pmin_tick_count is not None and int(pmin_tick_count) >= 2:
+        ymin, ymax = ax_pmin.get_ylim()
+        ax_pmin.set_yticks(np.linspace(ymin, ymax, int(pmin_tick_count)))
+    if vmax_tick_count is not None and int(vmax_tick_count) >= 2:
+        ymin, ymax = ax_vmax.get_ylim()
+        ax_vmax.set_yticks(np.linspace(ymin, ymax, int(vmax_tick_count)))
+
+    if invert_pmin_axis:
+        ax_pmin.invert_yaxis()
+    if grid:
+        ax_pmin.grid(True, linewidth=0.35, alpha=0.4)
+    if title:
+        ax_pmin.set_title(title)
+    if time_axis == "datetime" and len(valid_model_datetimes) == len(model_rows):
+        fig.autofmt_xdate()
+
+    handles = model_pmin_line + model_vmax_line + observed_lines
+    labels = [handle.get_label() for handle in handles]
+    ax_pmin.legend(handles, labels, loc="best")
+    plt.tight_layout()
+
+    if csv_output_file:
+        with Path(csv_output_file).open("w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["time", "lat", "lon", "Vmax", "Pmin", "RMW"])
+            for row in model_rows:
+                writer.writerow(
+                    [
+                        row["time"],
+                        f"{row['lat']:.6f}",
+                        f"{row['lon']:.6f}",
+                        f"{row['Vmax'] * float(model_vmax_scale):.6f}",
+                        f"{row['Pmin']:.6f}",
+                        f"{row['RMW']:.6f}",
+                    ]
+                )
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+
+    if return_data:
+        return fig, model_rows, observed_rows
+    return fig
+
+
 def plot_vertical_cross_section(
     files,
     file_index=0,
@@ -1799,5 +2099,6 @@ __all__ = [
     "parse_observed_atcf_track",
     "plot_animation_d03",
     "plot_track",
+    "plot_vortex_intensity_timeseries",
     "plot_vertical_cross_section",
 ]

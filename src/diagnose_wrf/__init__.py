@@ -4,6 +4,7 @@ from .workflow import (
     parse_observed_atcf_track,
     plot_animation_d03,
     plot_track,
+    plot_vortex_intensity_timeseries,
     plot_vertical_cross_section,
 )
 
@@ -11,5 +12,6 @@ __all__ = [
     "parse_observed_atcf_track",
     "plot_animation_d03",
     "plot_track",
+    "plot_vortex_intensity_timeseries",
     "plot_vertical_cross_section",
 ]
